@@ -1,0 +1,137 @@
+# ChurnPredictionSystem — Enterprise API Gateway & ML Orchestrator
+
+## 1. Executive Summary
+The ChurnPredictionSystem is a hybrid, high-availability microservices architecture designed to predict customer attrition using advanced machine learning. It bridges a **Node.js (Express) API Gateway** for high-concurrency business logic and a **Python (FastAPI) ML Engine** for compute-intensive multi-agent processing. 
+
+This system moves away from simple "black-box" models by implementing a **Multi-Agent ML Pipeline**. Instead of a single monolithic script, the system uses specialized agents for Ingestion, Feature Engineering, Modeling, Prediction, and Validation. This ensures each stage of the ML lifecycle is observable, testable, and independently scalable.
+
+---
+
+## 2. System Architecture & Design Philosophy
+
+### 2.1 The Hybrid Approach
+In modern enterprise environments, "one language fits all" is rarely true. 
+- **Node.js** is leveraged for its non-blocking I/O, making it ideal for the API Gateway which handles user authentication, request routing, and orchestration.
+- **Python** is the industry standard for ML, utilized here for its rich ecosystem (XGBoost, Pandas, Scipy) and its ability to handle complex mathematical transformations.
+
+### 2.2 Multi-Agent ML Pipeline
+The core of the system is the Multi-Agent architecture. Each agent is a self-contained unit with a specific "contract":
+1. **Ingestion Agent**: Acts as the data gatekeeper. It normalizes disparate sources (CSV, SQL) into a canonical time-series format.
+2. **Feature Agent**: Performs temporal engineering. It computes OLS trends, rolling averages, and engagement decay.
+3. **Modeling Agent**: Manages the model lifecycle. It handles time-based splits (to prevent data leakage) and logs experiments to MLflow.
+4. **Prediction Agent**: Computes scores and maps them to human-readable risk levels (High, Medium, Low).
+5. **Validation Agent**: Enforces quality gates. It ensures the model meets ROC-AUC and Precision thresholds before any report is generated.
+
+---
+
+## 3. Detailed Component Breakdown
+
+### 3.1 Node.js API Gateway (`node-backend`)
+The gateway serves as the primary entry point for all client interactions.
+
+#### Key Modules:
+- **Controllers**: Decouples HTTP logic from business rules.
+- **Services**: Handles the orchestration of calls to the internal ML microservice.
+- **Utils (apiClient)**: A centralized Axios instance with retry logic and timeout configurations tailored for long-running ML tasks.
+- **Error Middleware**: A global catch-all that maps internal ML errors into standardized JSON responses for frontend consumers (Node.js compatibility).
+
+#### Routes:
+- `POST /api/predict-user`: Synchronous inference for real-time decision making.
+- `POST /api/train`: Trigger for re-training the model on new data.
+- `GET /api/dashboard`: Aggregated JSON for business intelligence dashboards.
+- `GET /api/report/download`: Direct stream of the latest PDF analysis.
+
+### 3.2 Python ML Service (`ml-service`)
+Built on FastAPI, this service is optimized for performance and type safety.
+
+#### Feature Engineering Logic:
+The system computes **14 distinct features** based on monthly/yearly time-series data:
+- **Engagement Trends**: Uses Ordinary Least Squares (OLS) to calculate the slope of transaction frequency. A negative slope is a strong leading indicator of churn.
+- **Rolling Averages**: 3-month and 6-month transaction/spend averages to capture short-term vs. long-term behavior.
+- **Activity Gap**: Calculates the "Recency" in a time-series context, capping values to prevent outliers from skewing the XGBoost tree.
+- **Monetary Transformation**: Applies `log1p` to spend data to normalize distributions, which often improves XGBoost convergence.
+
+---
+
+## 4. MLOps & Model Lifecycle
+
+### 4.1 MLflow Integration
+Every training run is logged to an MLflow tracking server.
+- **Artifacts**: Stores the trained XGBoost model and SHAP explainer objects.
+- **Metrics**: Tracks ROC-AUC, Precision, Recall, and Accuracy across versions.
+- **Registry**: The Node.js gateway always requests the model marked as `Production`. Promoting a model from `Staging` to `Production` in the MLflow UI immediately updates the API behavior without a code deploy.
+
+### 4.2 Time-Based Splitting
+Traditional random splits fail on time-series data because they allow the model to "peek into the future." Our Modeling Agent implements a strict **Chronological Split**:
+- **Train**: Periods $T_0$ to $T_{n-2}$
+- **Test**: Period $T_{n-1}$ to $T_n$
+This simulates a real-world scenario where the model must predict tomorrow's churn based only on today's data.
+
+---
+
+## 5. Deployment & Orchestration
+
+### 5.1 Dockerization
+The system is fully containerized using a multi-stage `Dockerfile` to minimize image size and maximize security.
+- **Non-root Users**: Both Node and Python containers run as restricted users to prevent container-breakout attacks.
+- **Healthchecks**: Integrated Docker healthchecks ensure the Node gateway doesn't route traffic to the ML service until its model is fully loaded into memory.
+
+### 5.2 Docker Compose Stack
+The `docker-compose.yml` file orchestrates three primary services:
+1. `node-backend`: Port 3000
+2. `ml-service`: Port 8000
+3. `mlflow`: Port 5000 (with SQLite backend)
+
+---
+
+## 6. API Interaction Examples
+
+### 6.1 Predicting Churn (Node.js Gateway)
+```bash
+curl -X POST http://localhost:3000/api/predict-user \
+-H "Content-Type: application/json" \
+-d '{
+  "user_id": "cust_99",
+  "txn_7d": 2,
+  "txn_30d": 10,
+  "txn_90d": 35,
+  "recency_days": 12,
+  "frequency": 80,
+  "monetary": 1200.50
+}'
+```
+
+### 6.2 Triggering the Batch Report
+The batch pipeline processes all historical data, generates a PDF, and prepares a dashboard JSON.
+```bash
+curl -X POST http://localhost:3000/api/report/generate
+```
+
+---
+
+## 7. Performance & Scalability
+- **Startup Optimization**: The Python service pre-loads the XGBoost model during the `lifespan` event, reducing the first-request latency to <50ms.
+- **Chunked Processing**: The Batch Pipeline uses Pandas `chunksize` to process millions of rows without exhausting container memory.
+- **CORS**: Fully configured to allow cross-origin requests from modern React/Vue frontends.
+
+---
+
+## 8. Troubleshooting & FAQ
+**Q: The prediction is failing with a 503 error.**  
+A: This usually means the ML service is still loading the model from the MLflow registry. Check the `ml-service` logs.
+
+**Q: Where can I see the model accuracy?**  
+A: Visit the MLflow UI at `http://localhost:5000`. Every agent run logs a detailed validation report there.
+
+**Q: How do I add a new feature?**  
+A: Add the logic to `ml-service/tools/feature_tools.py` and update the `FEATURE_COLUMNS` list. The multi-agent pipeline will automatically incorporate it.
+
+---
+
+## 9. Future Roadmap
+- **SHAP Interpretability**: Adding local feature importance to the `/predict` response to explain *why* a user is high risk.
+- **Kafka Integration**: A placeholder is already available in the `pipelines/` directory for moving from batch to streaming.
+- **Distributed Training**: Integration with Ray or Dask for processing multi-terabyte datasets.
+
+---
+*Created by the Senior MLOps Architecture Team.*

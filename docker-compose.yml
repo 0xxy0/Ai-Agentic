@@ -1,0 +1,142 @@
+version: '3.8'
+
+# ── Shared network for all services ───────────────────────────────────────────
+networks:
+  churn-net:
+    driver: bridge
+
+# ── Persistent volumes ─────────────────────────────────────────────────────────
+volumes:
+  ml-data:
+  ml-reports:
+  ml-artifacts:
+  mlflow-db:
+  mongo-data:
+
+services:
+
+  # ── Nginx Load Balancer ──────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx-lb
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - node-backend
+    networks:
+      - churn-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # ── Node.js API Gateway (scale with: docker-compose up --scale node-backend=3)
+  node-backend:
+    build:
+      context: ./node-backend
+      dockerfile: Dockerfile
+    # NO container_name → allows multiple replicas
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      ml-service:
+        condition: service_healthy
+      mongo:
+        condition: service_started
+    networks:
+      - churn-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # ── Python FastAPI ML Microservice ───────────────────────────────────────────
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    container_name: ml-service
+    env_file:
+      - .env
+    environment:
+      - ENV=production
+      - BATCH_OUTPUT_DIR=/app/data/batch_results
+      - ACTIVITY_CSV_PATH=/app/data/activity.csv
+      - REPORTS_OUTPUT_DIR=/app/reports/output
+    volumes:
+      - ml-data:/app/data
+      - ml-reports:/app/reports
+      - ./ml-service/data:/app/data         # mount local data for model.json
+      - ./ml-service/reports:/app/reports   # mount local reports
+    depends_on:
+      - mlflow
+      - mongo
+    networks:
+      - churn-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # ── MongoDB Persistent Storage ──────────────────────────────────────────────
+  mongo:
+    image: mongo:6.0
+    container_name: churn-db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    networks:
+      - churn-net
+    restart: unless-stopped
+
+  # ── MLflow Tracking Server ───────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.12.1
+    container_name: mlflow
+    ports:
+      - "5000:5000"       # Expose for the ML team to inspect runs
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    volumes:
+      - mlflow-db:/mlflow
+      - ml-artifacts:/mlflow/artifacts
+    networks:
+      - churn-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+
