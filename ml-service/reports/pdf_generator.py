@@ -296,6 +296,22 @@ def build_dashboard_json(context: dict[str, Any]) -> dict[str, Any]:
             .to_dict(orient="records")
         )
 
+    # ── Trend Calculation ─────────────────────────────────────────────────────
+    trends = []
+    ts_df: pd.DataFrame = context.get("ts_df", pd.DataFrame())
+    if not ts_df.empty and "month" in ts_df.columns:
+        # Map month numbers to short names for frontend
+        month_map = {
+            1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+            7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"
+        }
+        # Group by month and count transactions as 'activity'
+        trend_agg = ts_df.groupby("month").size().reset_index(name="activity")
+        # Ensure month is numeric for sorting before mapping to names
+        trend_agg = trend_agg.sort_values("month")
+        trend_agg["month"] = trend_agg["month"].map(month_map)
+        trends = trend_agg.to_dict(orient="records")
+
     return {
         "summary":          summary,
         "validation":       val_report.get("evaluation_metrics", {}),
@@ -304,6 +320,7 @@ def build_dashboard_json(context: dict[str, Any]) -> dict[str, Any]:
             "notes":  context.get("quality_gate_notes", []),
         },
         "high_risk_users":  high_risk,
+        "trends":           trends,
         "run_id":           context.get("run_id"),
         "generated_at":     datetime.now(tz=timezone.utc).isoformat(),
     }

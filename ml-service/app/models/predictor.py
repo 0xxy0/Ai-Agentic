@@ -52,9 +52,14 @@ def predict_single(raw_features: dict[str, Any]) -> dict[str, Any]:
         df = pd.DataFrame([feature_dict])[FEATURE_COLUMNS]
 
         model = load_model()
-        preds = model.predict(df)
+        
+        # Use predict_proba for granular scores if available (native XGB or pyfunc)
+        if hasattr(model, "predict_proba"):
+            preds = model.predict_proba(df)
+        else:
+            preds = model.predict(df)
 
-        # XGBoost pyfunc returns a numpy array; grab probability of class 1
+        # Handle different response shapes from MLflow pyfunc vs native XGB
         if hasattr(preds, "shape") and len(preds.shape) == 2:
             churn_score = float(preds[0][1])
         else:
@@ -79,7 +84,15 @@ def predict_single(raw_features: dict[str, Any]) -> dict[str, Any]:
         }
 
     except Exception as exc:
-        logger.error("Prediction failed", extra={"error": str(exc)})
+        import traceback
+        logger.error(
+            "Prediction failed",
+            extra={
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+                "input_features": list(feature_dict.keys()) if 'feature_dict' in locals() else "none"
+            }
+        )
         raise RuntimeError(f"Inference error: {exc}") from exc
 
 

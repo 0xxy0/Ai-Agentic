@@ -1,0 +1,22 @@
+artifact_path: file:///D:/congnigant/AiAgentic/ml-service/artifacts/1/models/m-0977a8d8290c47dfb489440fbf020522/artifacts
+flavors:
+  python_function:
+    data: model.ubj
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.xgboost
+    python_version: 3.11.9
+  xgboost:
+    code: null
+    data: model.ubj
+    model_class: xgboost.sklearn.XGBClassifier
+    model_format: ubj
+    xgb_version: 3.2.0
+mlflow_version: 3.11.1
+model_id: m-0977a8d8290c47dfb489440fbf020522
+model_size_bytes: 284053
+model_uuid: m-0977a8d8290c47dfb489440fbf020522
+prompts: null
+run_id: 9294e657079e449b954b8afe88d5e01b
+utc_time_created: '2026-04-23 04:28:58.738910'

@@ -48,6 +48,17 @@ class MlService {
     }
   }
 
+  async getLatestCsv() {
+    try {
+      const response = await mlClient.get('/report/csv/latest', {
+        responseType: 'arraybuffer'
+      });
+      return response;
+    } catch (error) {
+      this._handleError(error);
+    }
+  }
+
   _handleError(error) {
     const status = error.response ? error.response.status : 500;
     const message = error.response ? error.response.data.detail : 'ML Service Unavailable';

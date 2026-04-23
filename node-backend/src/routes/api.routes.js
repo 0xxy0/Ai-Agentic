@@ -9,7 +9,9 @@ router.post('/train', predictionController.train);
 
 // Reports
 router.get('/dashboard', reportController.getDashboard);
+router.get('/reports', reportController.getReports);
 router.post('/report/generate', reportController.generateReport);
 router.get('/report/download', reportController.downloadPdf);
+router.get('/report/download-csv', reportController.downloadCsv);
 
 module.exports = router;

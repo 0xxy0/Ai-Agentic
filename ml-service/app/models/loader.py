@@ -53,17 +53,32 @@ def load_model(force_reload: bool = False) -> mlflow.pyfunc.PyFuncModel:
     logger.info("Loading model from MLflow", extra={"model_uri": model_uri})
 
     try:
+        # Fix for Windows paths in MLflow
+        if ":" in model_uri and not model_uri.startswith(("models:/", "runs:/", "file://", "http://", "https://")):
+            clean_path = model_uri.replace("\\", "/")
+            model_uri = f"file:///{clean_path}"
+            
         _model_cache = mlflow.pyfunc.load_model(model_uri)
-        logger.info("Model loaded successfully", extra={"model_uri": model_uri})
+        logger.info("Model loaded successfully from MLflow", extra={"model_uri": model_uri})
     except Exception as exc:
-        logger.error(
-            "Failed to load model from MLflow",
+        logger.warning(
+            "Failed to load model from MLflow. Checking local fallback...",
             extra={"model_uri": model_uri, "error": str(exc)},
         )
-        raise RuntimeError(
-            f"Could not load model from '{model_uri}'. "
-            "Ensure MLflow tracking server is running and the model is registered."
-        ) from exc
+        
+        # Local fallback using native XGBoost
+        import os
+        import xgboost as xgb
+        local_path = "data/model.json"
+        
+        if os.path.exists(local_path):
+            logger.info("Loading model from local fallback", extra={"path": local_path})
+            _model_cache = xgb.XGBClassifier()
+            _model_cache.load_model(local_path)
+        else:
+            raise RuntimeError(
+                f"Could not load model from '{model_uri}' and no local fallback found at '{local_path}'."
+            ) from exc
 
     return _model_cache
 

@@ -11,7 +11,7 @@ env/
 htmlcov/
 .mypy_cache/
 .ipynb_checkpoints/
-
+frontend
 # ── Node.js ──────────────────────────────────────────────────────────────────
 node_modules/
 npm-debug.log*

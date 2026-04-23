@@ -96,3 +96,22 @@ def download_latest_pdf() -> FileResponse:
         media_type="application/pdf",
         filename=pdfs[0].name,
     )
+
+
+@router.get("/csv/latest", summary="Download latest raw predictions CSV")
+def download_latest_csv() -> FileResponse:
+    """Return the most recently generated predictions CSV as a file download."""
+    output_dir = Path(settings.BATCH_OUTPUT_DIR)
+    csv_files = sorted(output_dir.glob("churn_scores_*.csv"), reverse=True)
+
+    if not csv_files:
+        raise HTTPException(
+            status_code=404,
+            detail="No CSV prediction files found. Run the batch pipeline first.",
+        )
+
+    return FileResponse(
+        path=str(csv_files[0]),
+        media_type="text/csv",
+        filename=csv_files[0].name,
+    )

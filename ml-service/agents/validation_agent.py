@@ -40,9 +40,8 @@ _MIN_RECALL    = float(getattr(settings, "MIN_RECALL",     0.40))
 
 
 def _derive_labels_from_gap(feature_df: pd.DataFrame, window_days: int) -> pd.Series:
-    """Re-derive binary churn labels from activity_gap for validation."""
-    gap_months = window_days / 30
-    return (feature_df["activity_gap"] >= gap_months).astype(int)
+    """Re-derive binary churn labels from recency_days for validation."""
+    return (feature_df["recency_days"] >= window_days).astype(int)
 
 
 class ValidationAgent:

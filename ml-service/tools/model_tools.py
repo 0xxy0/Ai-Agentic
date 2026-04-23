@@ -72,6 +72,27 @@ def log_model_to_mlflow(
         )
         run_id = run.info.run_id
         logger.info("Logged to MLflow", extra={"run_id": run_id, "metrics": metrics})
+
+        if register:
+            try:
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                mv = client.create_model_version(
+                    name=settings.MLFLOW_MODEL_NAME,
+                    source=f"runs:/{run_id}/model",
+                    run_id=run_id
+                )
+                if settings.MLFLOW_MODEL_STAGE:
+                    client.transition_model_version_stage(
+                        name=settings.MLFLOW_MODEL_NAME,
+                        version=mv.version,
+                        stage=settings.MLFLOW_MODEL_STAGE,
+                        archive_existing_versions=True
+                    )
+                    logger.info("Model transitioned to stage", extra={"stage": settings.MLFLOW_MODEL_STAGE, "version": mv.version})
+            except Exception as e:
+                logger.warning("Failed to transition model stage", extra={"error": str(e)})
+
     return run_id
 
 

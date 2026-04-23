@@ -63,7 +63,8 @@ def _derive_churn_label(
         Binary :class:`pandas.Series` aligned to ``feature_df`` index.
     """
     gap_months = window_days / 30
-    label = (feature_df["activity_gap"] >= gap_months).astype(int)
+    # In the new 12-column set, recency_days is already scaled to days (months * 30)
+    label = (feature_df["recency_days"] >= window_days).astype(int)
     churn_rate = label.mean()
     logger.info(
         "Churn labels derived",
@@ -129,17 +130,34 @@ class ModelingAgent:
         train_users = last_period_per_user[last_period_per_user <= cutoff].index
         test_users  = last_period_per_user[last_period_per_user >  cutoff].index
 
+        logger.info(
+            "Train/test split attempted",
+            extra={
+                "cutoff": str(cutoff),
+                "train_users_potential": len(train_users),
+                "test_users_potential": len(test_users),
+            },
+        )
+
         X = feature_df[feat_cols]
         X_train, y_train = X.loc[X.index.isin(train_users)], y.loc[y.index.isin(train_users)]
         X_test,  y_test  = X.loc[X.index.isin(test_users)],  y.loc[y.index.isin(test_users)]
 
+        # ── Fallback for single-class or empty splits (common in small sample data) ────
+        if len(y_train.unique()) < 2:
+            logger.warning("Time-based split resulted in single class. Falling back to random split.")
+            from sklearn.model_selection import train_test_split
+            train_idx, test_idx = train_test_split(feature_df.index, test_size=0.2, random_state=42)
+            X_train, y_train = X.loc[train_idx], y.loc[train_idx]
+            X_test, y_test = X.loc[test_idx], y.loc[test_idx]
+
         logger.info(
-            "Train/test split",
+            "Final split summary",
             extra={
-                "cutoff": str(cutoff),
-                "train_users": len(X_train),
-                "test_users": len(X_test),
-            },
+                "train_size": len(X_train),
+                "test_size": len(X_test),
+                "churn_rate_train": round(float(y_train.mean()), 4)
+            }
         )
 
         if len(X_test) == 0:
@@ -176,6 +194,12 @@ class ModelingAgent:
         context["train_metrics"]  = metrics
         context["train_end_month"] = cutoff.month
         context["train_end_year"]  = cutoff.year
+
+        # ── Local Fallback ───────────────────────────────────────────────────
+        import os
+        os.makedirs("data", exist_ok=True)
+        model.save_model("data/model.json")
+        logger.info("Model saved to local fallback: data/model.json")
 
         logger.info(
             "ModelingAgent complete",

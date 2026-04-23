@@ -99,41 +99,6 @@ def rolling_mean(series: pd.Series, window: int) -> float:
 # ── Batch feature builder ─────────────────────────────────────────────────────
 
 
-def build_user_features(
-    user_df: pd.DataFrame,
-    reference_period: pd.Period,
-) -> dict[str, Any]:
-    """
-    Compute all time-series features for a single user.
-
-    Args:
-        user_df: Subset of the normalised time-series DataFrame for one user,
-                 sorted chronologically.
-        reference_period: The latest period in the full dataset (used for gap calc).
-
-    Returns:
-        Feature dictionary with keys matching :data:`FEATURE_COLUMNS`.
-    """
-    txn = user_df["txn_count"]
-    spend = user_df["spend"]
-    periods = user_df["period"]
-
-    return {
-        "txn_last_month":    rolling_mean(txn, 1),
-        "txn_3_month_avg":   rolling_mean(txn, 3),
-        "txn_6_month_avg":   rolling_mean(txn, 6),
-        "txn_trend":         compute_txn_trend(txn),
-        "spend_last_month":  rolling_mean(spend, 1),
-        "spend_3_month_avg": rolling_mean(spend, 3),
-        "spend_6_month_avg": rolling_mean(spend, 6),
-        "spend_trend":       compute_spend_trend(spend),
-        "total_txn":         float(txn.sum()),
-        "total_spend":       float(spend.sum()),
-        "log_total_spend":   math.log1p(float(spend.sum())),
-        "activity_gap":      compute_activity_gap(periods, reference_period),
-        "n_active_months":   int(len(user_df)),
-        "spend_per_txn":     float(spend.sum()) / (float(txn.sum()) + _EPS),
-    }
 
 
 def build_feature_dataframe(
@@ -183,18 +148,63 @@ def build_feature_dataframe(
 # ── Feature column registry (model input contract) ───────────────────────────
 
 FEATURE_COLUMNS: list[str] = [
-    "txn_last_month",
-    "txn_3_month_avg",
-    "txn_6_month_avg",
-    "txn_trend",
-    "spend_last_month",
-    "spend_3_month_avg",
-    "spend_6_month_avg",
-    "spend_trend",
-    "total_txn",
-    "total_spend",
-    "log_total_spend",
-    "activity_gap",
-    "n_active_months",
-    "spend_per_txn",
+    "txn_7d",
+    "txn_30d",
+    "txn_90d",
+    "recency_days",
+    "frequency",
+    "monetary",
+    "usage_decay",
+    "txn_30d_90d_ratio",
+    "log_monetary",
+    "log_frequency",
+    "account_age_days",
+    "recency_normalized",
 ]
+
+
+def build_user_features(
+    user_df: pd.DataFrame,
+    reference_period: pd.Period,
+) -> dict[str, Any]:
+    """
+    Compute 12 summary features for a user from their time-series history.
+    """
+    txn = user_df["txn_count"]
+    spend = user_df["spend"]
+    periods = user_df["period"]
+
+    # Current month (last period in user data)
+    txn_30d = float(txn.iloc[-1]) if not txn.empty else 0.0
+    monetary = float(spend.sum())
+    freq = float(txn.sum())
+    
+    # 7d is approximated as 1/4 of the current month in this synthetic setup
+    txn_7d = txn_30d * 0.25 
+    
+    # 90d is last 3 months
+    txn_90d = float(txn.tail(3).sum())
+    
+    recency = compute_activity_gap(periods, reference_period) * 30 # convert to approx days
+    
+    usage_decay = txn_7d / (txn_30d + _EPS)
+    ratio_30_90 = txn_30d / (txn_90d + _EPS)
+    
+    # account age (diff between first and reference period)
+    first_active = periods.min()
+    age_days = (reference_period - first_active).n * 30
+
+    return {
+        "txn_7d":             txn_7d,
+        "txn_30d":            txn_30d,
+        "txn_90d":            txn_90d,
+        "recency_days":       float(recency),
+        "frequency":          freq,
+        "monetary":           monetary,
+        "usage_decay":        usage_decay,
+        "txn_30d_90d_ratio":  ratio_30_90,
+        "log_monetary":       math.log1p(monetary),
+        "log_frequency":      math.log1p(freq),
+        "account_age_days":   float(age_days),
+        "recency_normalized": recency / 365.0,
+    }

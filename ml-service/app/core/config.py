@@ -21,8 +21,11 @@ class Settings(BaseSettings):
 
     # ── API ───────────────────────────────────────────────────────────────
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    PYTHON_PORT: int = 8000
     CORS_ORIGINS: list[str] = ["*"]   # Restrict in production
+
+    # ── MongoDB ───────────────────────────────────────────────────────────
+    MONGO_URI: str = "mongodb://localhost:27017/churnai"
 
     # ── MLflow ────────────────────────────────────────────────────────────
     MLFLOW_TRACKING_URI: str = "http://localhost:5000"
@@ -56,9 +59,10 @@ class Settings(BaseSettings):
     ACTIVITY_CSV_PATH: str = "data/activity.csv"   # time-series format
 
     class Config:
-        env_file = ".env"
+        env_file = "../../.env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 @lru_cache()
